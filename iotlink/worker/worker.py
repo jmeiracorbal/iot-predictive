@@ -1,4 +1,4 @@
-"""Worker de adquisición. Consumo HTTP de un maestro o adaptador compatible."""
+"""Read measurements from a simulated master or compatible industrial gateway."""
 from __future__ import annotations
 
 import json
@@ -12,6 +12,19 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
+def _required(env: Mapping[str, str], name: str) -> str:
+    value = env.get(name, "").strip()
+    if not value:
+        raise ValueError(f"{name} is required")
+    return value
+
+
+def _boolean(name: str, raw: str) -> bool:
+    value = raw.lower()
+    if value not in ("true", "false"):
+        raise ValueError(f"{name} must be true or false")
+    return value == "true"
+
 def _positive(name: str, raw: str) -> float:
     try:
         value = float(raw)
@@ -24,34 +37,24 @@ def _positive(name: str, raw: str) -> float:
 
 def settings(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     env = os.environ if environ is None else environ
-    mode = env.get("IOTLINK_MASTER_MODE", "simulated").strip().lower()
+    mode = _required(env, "IOTLINK_MASTER_MODE").lower()
     if mode not in ("simulated", "real"):
-        raise ValueError("IOTLINK_MASTER_MODE debe ser simulated o real")
-    if mode == "real":
-        url = env.get("IOTLINK_REAL_MASTER_URL", "").strip()
-        if not url:
-            raise ValueError("IOTLINK_REAL_MASTER_URL es obligatorio en modo real")
-    else:
-        url = env.get(
-            "IOTLINK_SIMULATED_MASTER_URL",
-            "http://iotlink-master:1880/api/v1/measurements",
-        ).strip()
+        raise ValueError("IOTLINK_MASTER_MODE must be simulated or real")
 
+    url = _required(env, "IOTLINK_MASTER_URL")
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ValueError("La URL debe incluir protocolo HTTP(S) y host")
+        raise ValueError("IOTLINK_MASTER_URL must include an HTTP(S) scheme and host")
     if parsed.username or parsed.password:
-        raise ValueError("No incluyas credenciales en la URL")
+        raise ValueError("Do not embed credentials in IOTLINK_MASTER_URL")
 
     return {
         "mode": mode,
         "url": url,
-        "token": env.get("IOTLINK_REAL_MASTER_TOKEN", "").strip() if mode == "real" else "",
-        "interval": _positive("IOTLINK_POLL_INTERVAL_SECONDS", env.get("IOTLINK_POLL_INTERVAL_SECONDS", "5")),
-        "timeout": _positive("IOTLINK_HTTP_TIMEOUT_SECONDS", env.get("IOTLINK_HTTP_TIMEOUT_SECONDS", "5")),
-        "once": env.get("IOTLINK_RUN_ONCE", "false").strip().lower() in ("true", "1", "yes"),
+        "interval": _positive("IOTLINK_POLL_INTERVAL_SECONDS", _required(env, "IOTLINK_POLL_INTERVAL_SECONDS")),
+        "timeout": _positive("IOTLINK_HTTP_TIMEOUT_SECONDS", _required(env, "IOTLINK_HTTP_TIMEOUT_SECONDS")),
+        "once": _boolean("IOTLINK_RUN_ONCE", _required(env, "IOTLINK_RUN_ONCE")),
     }
-
 
 def validate_batch(payload: Any) -> list[dict[str, Any]]:
     if not isinstance(payload, dict) or payload.get("schema_version") != "1.0":
@@ -102,8 +105,6 @@ def validate_batch(payload: Any) -> list[dict[str, Any]]:
 
 def read_master(configuration: dict[str, Any]) -> list[dict[str, Any]]:
     headers = {"Accept": "application/json"}
-    if configuration["token"]:
-        headers["Authorization"] = "Bearer " + configuration["token"]
     request = Request(configuration["url"], headers=headers, method="GET")
     with urlopen(request, timeout=configuration["timeout"]) as response:
         return validate_batch(json.load(response))

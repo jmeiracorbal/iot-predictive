@@ -20,36 +20,43 @@ SAMPLE = {
 }
 
 
+CONFIG = {
+    "IOTLINK_MASTER_MODE": "simulated",
+    "IOTLINK_MASTER_URL": "http://iotlink-master:1880/api/v1/measurements",
+    "IOTLINK_POLL_INTERVAL_SECONDS": "5",
+    "IOTLINK_HTTP_TIMEOUT_SECONDS": "5",
+    "IOTLINK_RUN_ONCE": "false",
+}
+
+
 class TestConfiguration(unittest.TestCase):
-    def test_default_is_simulated(self):
-        cfg = settings({})
+    def test_simulated_source(self):
+        cfg = settings(CONFIG)
         self.assertEqual(cfg["mode"], "simulated")
-        self.assertIn("iotlink-master", cfg["url"])
+        self.assertEqual(cfg["url"], CONFIG["IOTLINK_MASTER_URL"])
 
-    def test_real_source_is_configurable(self):
-        cfg = settings({
-            "IOTLINK_MASTER_MODE": "real",
-            "IOTLINK_REAL_MASTER_URL": "http://192.168.1.40/api/v1/measurements",
-            "IOTLINK_REAL_MASTER_TOKEN": "example",
-        })
+    def test_real_source(self):
+        cfg = settings({**CONFIG, "IOTLINK_MASTER_MODE": "real", "IOTLINK_MASTER_URL": "http://192.168.1.40/api/v1/measurements"})
         self.assertEqual(cfg["mode"], "real")
-        self.assertEqual(cfg["token"], "example")
+        self.assertEqual(cfg["url"], "http://192.168.1.40/api/v1/measurements")
 
-    def test_real_mode_needs_url(self):
+    def test_missing_config(self):
         with self.assertRaises(ValueError):
-            settings({"IOTLINK_MASTER_MODE": "real"})
+            settings({})
+        with self.assertRaises(ValueError):
+            settings({k: v for k, v in CONFIG.items() if k != "IOTLINK_MASTER_URL"})
 
     def test_invalid_interval(self):
         with self.assertRaises(ValueError):
-            settings({"IOTLINK_POLL_INTERVAL_SECONDS": "0"})
+            settings({**CONFIG, "IOTLINK_POLL_INTERVAL_SECONDS": "0"})
 
-    def test_embedded_credentials_rejected(self):
+    def test_invalid_boolean(self):
         with self.assertRaises(ValueError):
-            settings({
-                "IOTLINK_MASTER_MODE": "real",
-                "IOTLINK_REAL_MASTER_URL": "http://user:password@host/api",
-            })
+            settings({**CONFIG, "IOTLINK_RUN_ONCE": "sometimes"})
 
+    def test_credentials_in_url_rejected(self):
+        with self.assertRaises(ValueError):
+            settings({**CONFIG, "IOTLINK_MASTER_URL": "http://user:password@host/api"})
 
 class TestContract(unittest.TestCase):
     def test_valid_values(self):
@@ -74,20 +81,14 @@ class TestContract(unittest.TestCase):
             validate_batch(payload)
 
     @patch("worker.urlopen")
-    def test_fetch_and_token(self, mock_urlopen):
+    def test_fetch(self, mock_urlopen):
         mock_urlopen.return_value.__enter__.return_value = io.BytesIO(
             json.dumps(SAMPLE).encode("utf-8")
         )
-        cfg = settings({
-            "IOTLINK_MASTER_MODE": "real",
-            "IOTLINK_REAL_MASTER_URL": "http://192.168.1.40/api/v1/measurements",
-            "IOTLINK_REAL_MASTER_TOKEN": "example",
-        })
-        values = read_master(cfg)
+        values = read_master(settings(CONFIG))
         self.assertEqual(values[0]["device_id"], "motor-01")
         sent = mock_urlopen.call_args.args[0]
-        self.assertEqual(sent.get_header("Authorization"), "Bearer example")
-
+        self.assertEqual(sent.get_header("Accept"), "application/json")
 
 if __name__ == "__main__":
     unittest.main()

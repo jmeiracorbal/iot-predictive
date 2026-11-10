@@ -12,9 +12,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Pruebas unitarias
+      - name: Unit tests
         run: python -m unittest discover -s iotlink/worker/tests -v
-      - name: Validación de Node-RED
+      - name: Validate Node-RED flows
         run: python -m json.tool iotlink/master/flows.json > /dev/null
-      - name: Validación de Docker Compose
+      - name: Validate Docker Compose
         run: docker compose --env-file .env.example config --quiet

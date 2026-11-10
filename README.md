@@ -1,56 +1,56 @@
 # iot-predictive
 
-Laboratorio reproducible de IoT industrial. Este primer incremento simula la monitorización de **dos motores industriales**, con temperatura, vibración y revoluciones. Es independiente de cualquier startup o instalación real.
+Industrial data acquisition example using Docker Compose. The sample monitors two simulated electric motors and reports temperature, vibration and RPM.
 
-## Servicios
+## Services
 
-- `iotlink-master`: Node-RED con un flujo que simula una API HTTP de maestro industrial.
-- `iotlink-worker`: Python independiente que consulta periódicamente al maestro, valida lecturas y emite registros JSON por consola.
-- `compose.yaml`: arranca los dos contenedores. La fuente de datos se cambia por variables de entorno.
+- `iotlink-master`: Node-RED with an HTTP endpoint returning simulated measurements.
+- `iotlink-worker`: Python service that polls the endpoint, validates its JSON response and logs the readings.
 
-**No se emula el protocolo físico IO-Link.** Se simula la interfaz de salida de datos del maestro. Para conectarse a un maestro real debe exponer el mismo contrato HTTP, directamente o a través de un adaptador específico del fabricante.
+Node-RED simulates the master's network-facing API, not the physical IO-Link protocol.
 
-## Arranque
+## Run
 
-Requisitos: Docker Compose v2, contenedores Linux, arquitectura AMD64 o ARM64.
+Requires Docker Compose v2 and Linux containers.
 
-```bash
+```sh
 cp .env.example .env
 docker compose up --build -d
 docker compose logs -f iotlink-worker
 ```
 
-Con la configuración por defecto, el worker recibe datos de dos motores cada cinco segundos. El segundo motor presenta una tendencia de incremento artificial de vibración para observar un escenario de fallo simulado. Estas curvas no representan un modelo físico validado.
+Node-RED editor: http://127.0.0.1:1880
 
-Node-RED: http://127.0.0.1:1880
-
-```bash
+```sh
 curl http://127.0.0.1:1880/health
 curl http://127.0.0.1:1880/api/v1/measurements
-docker compose logs --tail=30 iotlink-worker
 ```
 
-La interfaz Node-RED no incluye autenticación en este laboratorio. Solo se publica en `127.0.0.1` por defecto y no debe exponerse públicamente.
+The example returns measurements for two motors. The second motor's vibration increases over time. The simulator is not a calibrated physical model.
 
-## Alternar entre maestro simulado y real
+The Node-RED editor has no authentication. `.env.example` binds it to localhost. Do not expose it to an untrusted network.
 
-En `.env`, cambiar:
+## Configuration
 
-```dotenv
-IOTLINK_MASTER_MODE=real
-IOTLINK_REAL_MASTER_URL=http://192.168.1.40/api/v1/measurements
-IOTLINK_REAL_MASTER_TOKEN=
-```
+Copy `.env.example` to `.env` before starting the stack. Compose reads all interpolated values from the environment and supplies no fallback values.
 
-Ejecutar `docker compose up -d --build`. La URL real debe ser accesible desde **el contenedor**, no solo desde el host. En modo real el maestro simulado sigue arrancando, pero el worker no lo consulta.
+| Variable | Description |
+| --- | --- |
+| `IOTLINK_MASTER_MODE` | `simulated` or `real` |
+| `IOTLINK_MASTER_URL` | HTTP measurement endpoint reachable from the worker |
+| `IOTLINK_BIND_ADDRESS` | Host interface for the Node-RED port |
+| `IOTLINK_MASTER_PORT` | Published host port for Node-RED |
+| `IOTLINK_POLL_INTERVAL_SECONDS` | Seconds between requests |
+| `IOTLINK_HTTP_TIMEOUT_SECONDS` | HTTP request timeout in seconds |
+| `IOTLINK_RUN_ONCE` | `true` to poll once, otherwise `false` |
 
-Si el maestro real usa OPC UA, MQTT, una API propietaria, otra estructura JSON o autenticación diferente, necesitará un adaptador. No existe una interfaz IP universal para todos los maestros IO-Link.
+`.env.example` contains a complete working configuration for the simulated master.
 
-Las credenciales no deben incorporarse al repositorio. `.env` está en `.gitignore`.
+To read from a real master, set `IOTLINK_MASTER_MODE=real` and change `IOTLINK_MASTER_URL` to an address accessible from the worker container. The simulated master still starts but is not queried by the worker. The external device must serve the same HTTP JSON contract, either directly or through an adapter. Vendor protocols are not implemented.
 
-## Contrato de lectura
+## HTTP contract
 
-`GET /api/v1/measurements` devuelve:
+`GET /api/v1/measurements` returns:
 
 ```json
 {
@@ -62,39 +62,24 @@ Las credenciales no deben incorporarse al repositorio. `.env` está en `.gitigno
       "device_id": "motor-01",
       "timestamp": "2026-11-10T10:00:00Z",
       "quality": "good",
-      "values": { "temperature_c": 47.4, "vibration_mm_s": 2.1, "rpm": 1450 }
+      "values": {
+        "temperature_c": 47.4,
+        "vibration_mm_s": 2.1,
+        "rpm": 1450
+      }
     }
   ]
 }
 ```
 
-Los tiempos deben llevar zona horaria. La calidad puede ser `good`, `uncertain` o `bad`. Se admiten otras variables numéricas, conservando el esquema. Por ahora el worker solo lee, valida y escribe una línea JSON por lectura. **No hay todavía PostgreSQL, Jupyter ni predicción**, que pertenecerán a fases posteriores.
+Timestamps must have a timezone. `quality` is one of `good`, `uncertain` or `bad`. The worker rejects malformed payloads and writes one JSON log per reading.
 
-## Código fuente
+## Tests
 
-```text
-iot-predictive/
-├── compose.yaml
-├── .env.example
-├── iotlink/
-│   ├── master/
-│   │   ├── Dockerfile
-│   │   └── flows.json
-│   └── worker/
-│       ├── Dockerfile
-│       ├── worker.py
-│       └── tests/test_worker.py
-└── .github/workflows/ci.yaml
-```
-
-El flujo Node-RED está incorporado a la imagen. Los cambios hechos en su editor no persistirán tras recrear el contenedor. Para conservarlos, exporta el flujo a `iotlink/master/flows.json` y reconstruye la imagen.
-
-## Pruebas
-
-```bash
+```sh
 python -m unittest discover -s iotlink/worker/tests -v
 python -m json.tool iotlink/master/flows.json > /dev/null
 docker compose --env-file .env.example config --quiet
 ```
 
-El workflow de CI ejecuta pruebas unitarias y validaciones de configuración. El despliegue con Docker debe comprobarse en un entorno con Docker. Este laboratorio no envía órdenes a equipos físicos.
+GitHub Actions runs the tests and checks. The Compose stack must be run separately to verify container startup. This phase does not implement SQL storage, model training or device control.
