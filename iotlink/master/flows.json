@@ -1,0 +1,105 @@
+[
+  {
+    "id": "iotlink-tab",
+    "type": "tab",
+    "label": "IO-Link, simulación del maestro",
+    "disabled": false,
+    "info": "Interfaz HTTP simulada. No implementa el protocolo físico IO-Link."
+  },
+  {
+    "id": "read-http",
+    "type": "http in",
+    "z": "iotlink-tab",
+    "name": "Mediciones",
+    "url": "/api/v1/measurements",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 150,
+    "y": 120,
+    "wires": [
+      [
+        "read-fn"
+      ]
+    ]
+  },
+  {
+    "id": "read-fn",
+    "type": "function",
+    "z": "iotlink-tab",
+    "name": "Datos de dos motores",
+    "func": "const tick = (flow.get(\"tick\") || 0) + 1;\nflow.set(\"tick\", tick);\n\nconst timestamp = new Date().toISOString();\nconst round = number => Number(number.toFixed(2));\nconst motors = [\n    { device_id: \"motor-01\", temperature: 47, vibration: 1.9, rpm: 1450 },\n    { device_id: \"motor-02\", temperature: 51, vibration: 2.3, rpm: 1490 }\n];\nconst readings = motors.map((motor, index) => {\n    const phase = tick / 5 + index;\n    const fault = index === 1 ? Math.min(tick * 0.045, 3.5) : 0;\n    return {\n        device_id: motor.device_id,\n        timestamp,\n        quality: \"good\",\n        values: {\n            temperature_c: round(motor.temperature + Math.sin(phase) * 0.8 + fault * 1.2),\n            vibration_mm_s: round(motor.vibration + Math.sin(phase * 1.7) * 0.2 + fault),\n            rpm: Math.round(motor.rpm + Math.sin(phase) * 8)\n        }\n    };\n});\nmsg.statusCode = 200;\nmsg.headers = { \"Content-Type\": \"application/json\" };\nmsg.payload = { schema_version: \"1.0\", source: \"iotlink-master-simulated\", generated_at: timestamp, readings };\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 410,
+    "y": 120,
+    "wires": [
+      [
+        "read-response"
+      ]
+    ]
+  },
+  {
+    "id": "read-response",
+    "type": "http response",
+    "z": "iotlink-tab",
+    "name": "Respuesta JSON",
+    "statusCode": "",
+    "headers": {},
+    "x": 670,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "health-http",
+    "type": "http in",
+    "z": "iotlink-tab",
+    "name": "Estado",
+    "url": "/health",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 150,
+    "y": 220,
+    "wires": [
+      [
+        "health-fn"
+      ]
+    ]
+  },
+  {
+    "id": "health-fn",
+    "type": "function",
+    "z": "iotlink-tab",
+    "name": "Health",
+    "func": "msg.statusCode = 200;\nmsg.headers = { \"Content-Type\": \"application/json\" };\nmsg.payload = { status: \"ok\", service: \"iotlink-master\" };\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 410,
+    "y": 220,
+    "wires": [
+      [
+        "health-response"
+      ]
+    ]
+  },
+  {
+    "id": "health-response",
+    "type": "http response",
+    "z": "iotlink-tab",
+    "name": "Respuesta health",
+    "statusCode": "",
+    "headers": {},
+    "x": 670,
+    "y": 220,
+    "wires": []
+  }
+]

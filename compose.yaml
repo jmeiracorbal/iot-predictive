@@ -1,0 +1,41 @@
+name: iot-predictive
+
+services:
+  iotlink-master:
+    build:
+      context: ./iotlink/master
+    environment:
+      FLOWS: flows.json
+    ports:
+      - "${IOTLINK_BIND_ADDRESS:-127.0.0.1}:${IOTLINK_MASTER_PORT:-1880}:1880"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:1880/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    networks: [iotlink]
+
+  iotlink-worker:
+    build:
+      context: ./iotlink/worker
+    depends_on:
+      iotlink-master:
+        condition: service_healthy
+    environment:
+      IOTLINK_MASTER_MODE: ${IOTLINK_MASTER_MODE:-simulated}
+      IOTLINK_SIMULATED_MASTER_URL: http://iotlink-master:1880/api/v1/measurements
+      IOTLINK_REAL_MASTER_URL: ${IOTLINK_REAL_MASTER_URL:-}
+      IOTLINK_REAL_MASTER_TOKEN: ${IOTLINK_REAL_MASTER_TOKEN:-}
+      IOTLINK_POLL_INTERVAL_SECONDS: ${IOTLINK_POLL_INTERVAL_SECONDS:-5}
+      IOTLINK_HTTP_TIMEOUT_SECONDS: ${IOTLINK_HTTP_TIMEOUT_SECONDS:-5}
+      IOTLINK_RUN_ONCE: ${IOTLINK_RUN_ONCE:-false}
+    restart: unless-stopped
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    networks: [iotlink]
+
+networks:
+  iotlink:
+    driver: bridge
