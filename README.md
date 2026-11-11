@@ -54,8 +54,6 @@ Readings are held in Node-RED's in-memory context and are replaced by newer read
 
 | Variable | Description |
 | --- | --- |
-| `IOTLINK_BIND_ADDRESS` | Host interface to publish Node-RED on |
-| `IOTLINK_MASTER_PORT` | Node-RED's listening and published port |
 | `IOTLINK_MASTER_URL` | Worker destination URL |
 | `IOTLINK_GENERATION_INTERVAL_SECONDS` | Seconds between generated batches |
 | `IOTLINK_HTTP_TIMEOUT_SECONDS` | Publish request timeout in seconds |
@@ -63,7 +61,7 @@ Readings are held in Node-RED's in-memory context and are replaced by newer read
 
 To use a compatible external master or gateway, update `IOTLINK_MASTER_URL` to its HTTP ingestion endpoint, reachable from the worker's network. That endpoint must accept this batch format. Vendor-specific IO-Link protocols are not implemented. Do not send simulated measurements to production equipment.
 
-The Node-RED editor and the ingestion API have no authentication and are bound to `127.0.0.1` on the host by the example configuration. Keep the environment on a trusted network.
+The Node-RED editor and ingestion API have no authentication and are bound to `127.0.0.1:1880` in Compose. Keep the environment on a trusted network.
 
 ## Tests
 

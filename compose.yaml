@@ -4,10 +4,8 @@ services:
   iotlink-master:
     build:
       context: ./iotlink/master
-    environment:
-      PORT: ${IOTLINK_MASTER_PORT}
     ports:
-      - "${IOTLINK_BIND_ADDRESS}:${IOTLINK_MASTER_PORT}:${IOTLINK_MASTER_PORT}"
+      - "127.0.0.1:1880:1880"
     restart: unless-stopped
     networks: [iotlink]
 
