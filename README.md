@@ -19,13 +19,13 @@ docker compose up --build -d
 docker compose logs -f iotlink-worker
 ```
 
-Node-RED editor: `http://127.0.0.1:1880`
+Node-RED editor: `http://localhost:1880`
 
 Check the API:
 
 ```sh
-curl http://127.0.0.1:1880/health
-curl http://127.0.0.1:1880/api/v1/measurements
+curl http://localhost:1880/health
+curl http://localhost:1880/api/v1/measurements
 ```
 
 ### HTTP API
@@ -41,7 +41,7 @@ Each batch contains a `schema_version` (`1.0`) and `readings`. A reading include
 Example POST:
 
 ```sh
-curl -i -X POST http://127.0.0.1:1880/api/v1/measurements \
+curl -i -X POST http://localhost:1880/api/v1/measurements \
   -H 'Content-Type: application/json' \
   -d '{"schema_version":"1.0","readings":[{"device_id":"motor-03","timestamp":"2026-11-11T10:00:00Z","quality":"good","values":{"temperature_c":45.2,"vibration_mm_s":1.8,"rpm":1460}}]}'
 ```
@@ -61,7 +61,7 @@ Readings are held in Node-RED's in-memory context and are replaced by newer read
 
 To use a compatible external master or gateway, update `IOTLINK_MASTER_URL` to its HTTP ingestion endpoint, reachable from the worker's network. That endpoint must accept this batch format. Vendor-specific IO-Link protocols are not implemented. Do not send simulated measurements to production equipment.
 
-The Node-RED editor and ingestion API have no authentication and are bound to `127.0.0.1:1880` in Compose. Keep the environment on a trusted network.
+The Node-RED editor and ingestion API have no authentication. Compose publishes port `1880` on all host interfaces.
 
 ## Tests
 

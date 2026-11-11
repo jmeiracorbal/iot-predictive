@@ -5,7 +5,7 @@ services:
     build:
       context: ./iotlink/master
     ports:
-      - "127.0.0.1:1880:1880"
+      - "1880:1880"
     restart: unless-stopped
     networks: [iotlink]
 
