@@ -5,15 +5,9 @@ services:
     build:
       context: ./iotlink/master
     environment:
-      FLOWS: flows.json
+      PORT: ${IOTLINK_MASTER_PORT}
     ports:
-      - "${IOTLINK_BIND_ADDRESS}:${IOTLINK_MASTER_PORT}:1880"
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:1880/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
-      start_period: 30s
-      interval: 10s
-      timeout: 5s
-      retries: 12
+      - "${IOTLINK_BIND_ADDRESS}:${IOTLINK_MASTER_PORT}:${IOTLINK_MASTER_PORT}"
     restart: unless-stopped
     networks: [iotlink]
 
@@ -24,14 +18,12 @@ services:
       iotlink-master:
         condition: service_healthy
     environment:
-      IOTLINK_MASTER_MODE: ${IOTLINK_MASTER_MODE}
       IOTLINK_MASTER_URL: ${IOTLINK_MASTER_URL}
-      IOTLINK_POLL_INTERVAL_SECONDS: ${IOTLINK_POLL_INTERVAL_SECONDS}
+      IOTLINK_GENERATION_INTERVAL_SECONDS: ${IOTLINK_GENERATION_INTERVAL_SECONDS}
       IOTLINK_HTTP_TIMEOUT_SECONDS: ${IOTLINK_HTTP_TIMEOUT_SECONDS}
       IOTLINK_RUN_ONCE: ${IOTLINK_RUN_ONCE}
     restart: unless-stopped
     read_only: true
-    security_opt: ["no-new-privileges:true"]
     networks: [iotlink]
 
 networks:

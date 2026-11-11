@@ -1,4 +1,5 @@
-"""Read measurements from a simulated master or compatible industrial gateway."""
+"""Generate motor telemetry and publish it to a compatible master API."""
+
 from __future__ import annotations
 
 import json
@@ -12,112 +13,105 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
-def _required(env: Mapping[str, str], name: str) -> str:
+def required(env: Mapping[str, str], name: str) -> str:
     value = env.get(name, "").strip()
     if not value:
         raise ValueError(f"{name} is required")
     return value
 
 
-def _boolean(name: str, raw: str) -> bool:
-    value = raw.lower()
-    if value not in ("true", "false"):
-        raise ValueError(f"{name} must be true or false")
-    return value == "true"
-
-def _positive(name: str, raw: str) -> float:
+def positive(name: str, value: str) -> float:
     try:
-        value = float(raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} debe ser numérico") from exc
-    if not math.isfinite(value) or value <= 0:
-        raise ValueError(f"{name} debe ser mayor que cero")
-    return value
+        number = float(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be numeric") from exc
+    if not math.isfinite(number) or number <= 0:
+        raise ValueError(f"{name} must be greater than zero")
+    return number
 
 
 def settings(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
     env = os.environ if environ is None else environ
-    mode = _required(env, "IOTLINK_MASTER_MODE").lower()
-    if mode not in ("simulated", "real"):
-        raise ValueError("IOTLINK_MASTER_MODE must be simulated or real")
-
-    url = _required(env, "IOTLINK_MASTER_URL")
+    url = required(env, "IOTLINK_MASTER_URL")
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ValueError("IOTLINK_MASTER_URL must include an HTTP(S) scheme and host")
+        raise ValueError("IOTLINK_MASTER_URL must have an HTTP(S) scheme and host")
     if parsed.username or parsed.password:
-        raise ValueError("Do not embed credentials in IOTLINK_MASTER_URL")
+        raise ValueError("IOTLINK_MASTER_URL must not contain credentials")
+
+    run_once = required(env, "IOTLINK_RUN_ONCE").lower()
+    if run_once not in ("true", "false"):
+        raise ValueError("IOTLINK_RUN_ONCE must be true or false")
 
     return {
-        "mode": mode,
         "url": url,
-        "interval": _positive("IOTLINK_POLL_INTERVAL_SECONDS", _required(env, "IOTLINK_POLL_INTERVAL_SECONDS")),
-        "timeout": _positive("IOTLINK_HTTP_TIMEOUT_SECONDS", _required(env, "IOTLINK_HTTP_TIMEOUT_SECONDS")),
-        "once": _boolean("IOTLINK_RUN_ONCE", _required(env, "IOTLINK_RUN_ONCE")),
+        "interval": positive(
+            "IOTLINK_GENERATION_INTERVAL_SECONDS",
+            required(env, "IOTLINK_GENERATION_INTERVAL_SECONDS"),
+        ),
+        "timeout": positive(
+            "IOTLINK_HTTP_TIMEOUT_SECONDS",
+            required(env, "IOTLINK_HTTP_TIMEOUT_SECONDS"),
+        ),
+        "once": run_once == "true",
     }
 
-def validate_batch(payload: Any) -> list[dict[str, Any]]:
-    if not isinstance(payload, dict) or payload.get("schema_version") != "1.0":
-        raise ValueError("Contrato JSON incompatible. Se requiere schema_version 1.0")
-    readings = payload.get("readings")
-    if not isinstance(readings, list):
-        raise ValueError("'readings' debe ser una lista")
 
-    result = []
-    for index, reading in enumerate(readings):
-        if not isinstance(reading, dict):
-            raise ValueError(f"Lectura {index}: se requiere un objeto")
-        device_id = reading.get("device_id")
-        if not isinstance(device_id, str) or not device_id.strip():
-            raise ValueError(f"Lectura {index}: device_id obligatorio")
+def generate_batch(sequence: int, timestamp: datetime | None = None) -> dict[str, Any]:
+    if sequence < 1:
+        raise ValueError("sequence must be positive")
 
-        timestamp = reading.get("timestamp")
-        if not isinstance(timestamp, str):
-            raise ValueError(f"Lectura {index}: timestamp obligatorio")
-        try:
-            date = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        except ValueError as exc:
-            raise ValueError(f"Lectura {index}: timestamp no válido") from exc
-        if date.tzinfo is None or date.utcoffset() is None:
-            raise ValueError(f"Lectura {index}: timestamp sin zona horaria")
-
-        quality = reading.get("quality", "good")
-        if quality not in ("good", "uncertain", "bad"):
-            raise ValueError(f"Lectura {index}: calidad no válida")
-
-        values = reading.get("values")
-        if not isinstance(values, dict) or not values:
-            raise ValueError(f"Lectura {index}: 'values' debe tener mediciones")
-        for name, value in values.items():
-            if not isinstance(name, str) or not name:
-                raise ValueError(f"Lectura {index}: variable sin nombre")
-            if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value):
-                raise ValueError(f"Lectura {index}: {name} debe ser un número finito")
-
-        result.append({
-            "device_id": device_id,
-            "timestamp": timestamp,
-            "quality": quality,
-            "values": values,
+    moment = (timestamp or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
+    readings = []
+    for index, motor in enumerate((
+        {"device_id": "motor-01", "temperature": 47.0, "vibration": 1.9, "rpm": 1450},
+        {"device_id": "motor-02", "temperature": 51.0, "vibration": 2.3, "rpm": 1490},
+    )):
+        phase = sequence / 5 + index
+        fault = min(sequence * 0.045, 3.5) if index == 1 else 0.0
+        readings.append({
+            "device_id": motor["device_id"],
+            "timestamp": moment,
+            "quality": "good",
+            "values": {
+                "temperature_c": round(motor["temperature"] + math.sin(phase) * 0.8 + fault * 1.2, 2),
+                "vibration_mm_s": round(motor["vibration"] + math.sin(phase * 1.7) * 0.2 + fault, 2),
+                "rpm": round(motor["rpm"] + math.sin(phase) * 8),
+            },
         })
-    return result
+
+    return {
+        "schema_version": "1.0",
+        "source": "iotlink-worker",
+        "generated_at": moment,
+        "readings": readings,
+    }
 
 
-def read_master(configuration: dict[str, Any]) -> list[dict[str, Any]]:
-    headers = {"Accept": "application/json"}
-    request = Request(configuration["url"], headers=headers, method="GET")
-    with urlopen(request, timeout=configuration["timeout"]) as response:
-        return validate_batch(json.load(response))
+def publish(url: str, batch: dict[str, Any], timeout: float) -> int:
+    data = json.dumps(batch, allow_nan=False).encode("utf-8")
+    request = Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    with urlopen(request, timeout=timeout) as response:
+        if response.status != 202:
+            raise ValueError(f"Unexpected response status: {response.status}")
+        reply = json.load(response)
+    accepted = reply.get("accepted") if isinstance(reply, dict) else None
+    if type(accepted) is not int or accepted != len(batch["readings"]):
+        raise ValueError("The master did not acknowledge all readings")
+    return accepted
 
 
 def log(level: str, event: str, **fields: Any) -> None:
-    output = {
-        "level": level,
-        "event": event,
-        "recorded_at": datetime.now(timezone.utc).isoformat(),
-        **fields,
-    }
-    print(json.dumps(output, ensure_ascii=False), file=sys.stderr if level == "error" else sys.stdout, flush=True)
+    print(
+        json.dumps({"level": level, "event": event, **fields}, ensure_ascii=False),
+        file=sys.stderr if level == "error" else sys.stdout,
+        flush=True,
+    )
 
 
 def main() -> int:
@@ -127,18 +121,18 @@ def main() -> int:
         log("error", "invalid_configuration", message=str(exc))
         return 2
 
-    log("info", "worker_started", mode=configuration["mode"], url=configuration["url"])
+    sequence = 0
     while True:
+        sequence += 1
+        batch = generate_batch(sequence)
+        log("info", "generated", sequence=sequence, readings=len(batch["readings"]))
         success = True
         try:
-            readings = read_master(configuration)
-            for reading in readings:
-                log("info", "measurement", master_mode=configuration["mode"], **reading)
-            if not readings:
-                log("info", "empty_batch", master_mode=configuration["mode"])
+            accepted = publish(configuration["url"], batch, configuration["timeout"])
+            log("info", "published", sequence=sequence, accepted=accepted)
         except (OSError, ValueError) as exc:
             success = False
-            log("error", "acquisition_failed", mode=configuration["mode"], message=str(exc))
+            log("error", "publish_failed", sequence=sequence, message=str(exc))
 
         if configuration["once"]:
             return 0 if success else 1
@@ -149,4 +143,4 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except KeyboardInterrupt:
-        log("info", "worker_stopped")
+        log("info", "stopped")

@@ -13,8 +13,10 @@ jobs:
         with:
           python-version: "3.12"
       - name: Unit tests
-        run: python -m unittest discover -s iotlink/worker/tests -v
+        run: python -m unittest discover -s tests -v
       - name: Validate Node-RED flows
         run: python -m json.tool iotlink/master/flows.json > /dev/null
+      - name: Validate healthcheck JavaScript
+        run: node --check iotlink/master/healthcheck.js
       - name: Validate Docker Compose
         run: docker compose --env-file .env.example config --quiet

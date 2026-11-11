@@ -2,69 +2,117 @@
   {
     "id": "iotlink-tab",
     "type": "tab",
-    "label": "IO-Link, simulación del maestro",
+    "label": "IO-Link master API",
     "disabled": false,
-    "info": "Interfaz HTTP simulada. No implementa el protocolo físico IO-Link."
+    "info": "Receives readings from workers and exposes the latest measurements."
   },
   {
-    "id": "read-http",
+    "id": "ingest-in",
     "type": "http in",
     "z": "iotlink-tab",
-    "name": "Mediciones",
+    "name": "Receive measurements",
     "url": "/api/v1/measurements",
-    "method": "get",
+    "method": "post",
     "upload": false,
     "swaggerDoc": "",
-    "x": 150,
-    "y": 120,
+    "x": 160,
+    "y": 100,
     "wires": [
       [
-        "read-fn"
+        "ingest-fn"
       ]
     ]
   },
   {
-    "id": "read-fn",
+    "id": "ingest-fn",
     "type": "function",
     "z": "iotlink-tab",
-    "name": "Datos de dos motores",
-    "func": "const tick = (flow.get(\"tick\") || 0) + 1;\nflow.set(\"tick\", tick);\n\nconst timestamp = new Date().toISOString();\nconst round = number => Number(number.toFixed(2));\nconst motors = [\n    { device_id: \"motor-01\", temperature: 47, vibration: 1.9, rpm: 1450 },\n    { device_id: \"motor-02\", temperature: 51, vibration: 2.3, rpm: 1490 }\n];\nconst readings = motors.map((motor, index) => {\n    const phase = tick / 5 + index;\n    const fault = index === 1 ? Math.min(tick * 0.045, 3.5) : 0;\n    return {\n        device_id: motor.device_id,\n        timestamp,\n        quality: \"good\",\n        values: {\n            temperature_c: round(motor.temperature + Math.sin(phase) * 0.8 + fault * 1.2),\n            vibration_mm_s: round(motor.vibration + Math.sin(phase * 1.7) * 0.2 + fault),\n            rpm: Math.round(motor.rpm + Math.sin(phase) * 8)\n        }\n    };\n});\nmsg.statusCode = 200;\nmsg.headers = { \"Content-Type\": \"application/json\" };\nmsg.payload = { schema_version: \"1.0\", source: \"iotlink-master-simulated\", generated_at: timestamp, readings };\nreturn msg;",
+    "name": "Validate and store readings",
+    "func": "const payload = msg.payload;\n\nfunction reject(reason) {\n    msg.statusCode = 400;\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = { error: reason };\n    return msg;\n}\n\nif (!payload || payload.schema_version !== \"1.0\" || !Array.isArray(payload.readings)) {\n    return reject(\"Expected schema_version 1.0 and an array of readings\");\n}\n\nif (payload.readings.length === 0) {\n    return reject(\"At least one reading is required\");\n}\n\nfor (const reading of payload.readings) {\n    if (!reading || typeof reading.device_id !== \"string\" || !reading.device_id.trim()) {\n        return reject(\"Every reading requires a device_id\");\n    }\n    if (typeof reading.timestamp !== \"string\" || Number.isNaN(Date.parse(reading.timestamp)) || !/(Z|[+-]\\d{2}:\\d{2})$/.test(reading.timestamp)) {\n        return reject(\"Every reading requires a timezone-aware timestamp\");\n    }\n    if (![\"good\", \"uncertain\", \"bad\"].includes(reading.quality)) {\n        return reject(\"Invalid reading quality\");\n    }\n    const values = reading.values;\n    if (!values || typeof values !== \"object\" || Array.isArray(values) || Object.keys(values).length === 0) {\n        return reject(\"Every reading requires measured values\");\n    }\n    if (!Object.entries(values).every(([name, value]) => name && typeof value === \"number\" && Number.isFinite(value))) {\n        return reject(\"Measurements must have names and finite numeric values\");\n    }\n}\n\nconst latest = flow.get(\"latest\") || {};\nfor (const reading of payload.readings) {\n    latest[reading.device_id] = reading;\n}\nflow.set(\"latest\", latest);\n\nmsg.statusCode = 202;\nmsg.headers = { \"Content-Type\": \"application/json\" };\nmsg.payload = { accepted: payload.readings.length };\nreturn msg;",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 410,
-    "y": 120,
+    "x": 440,
+    "y": 100,
     "wires": [
       [
-        "read-response"
+        "ingest-out"
       ]
     ]
   },
   {
-    "id": "read-response",
+    "id": "ingest-out",
     "type": "http response",
     "z": "iotlink-tab",
-    "name": "Respuesta JSON",
+    "name": "202 or 400",
     "statusCode": "",
     "headers": {},
-    "x": 670,
-    "y": 120,
+    "x": 720,
+    "y": 100,
     "wires": []
   },
   {
-    "id": "health-http",
+    "id": "latest-in",
     "type": "http in",
     "z": "iotlink-tab",
-    "name": "Estado",
+    "name": "List latest readings",
+    "url": "/api/v1/measurements",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 160,
+    "y": 200,
+    "wires": [
+      [
+        "latest-fn"
+      ]
+    ]
+  },
+  {
+    "id": "latest-fn",
+    "type": "function",
+    "z": "iotlink-tab",
+    "name": "Read latest measurements",
+    "func": "const latest = flow.get(\"latest\") || {};\nmsg.statusCode = 200;\nmsg.headers = { \"Content-Type\": \"application/json\" };\nmsg.payload = {\n    schema_version: \"1.0\",\n    readings: Object.values(latest).sort((a, b) => a.device_id.localeCompare(b.device_id))\n};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 200,
+    "wires": [
+      [
+        "latest-out"
+      ]
+    ]
+  },
+  {
+    "id": "latest-out",
+    "type": "http response",
+    "z": "iotlink-tab",
+    "name": "200",
+    "statusCode": "",
+    "headers": {},
+    "x": 720,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "health-in",
+    "type": "http in",
+    "z": "iotlink-tab",
+    "name": "Health",
     "url": "/health",
     "method": "get",
     "upload": false,
     "swaggerDoc": "",
-    "x": 150,
-    "y": 220,
+    "x": 160,
+    "y": 300,
     "wires": [
       [
         "health-fn"
@@ -75,31 +123,31 @@
     "id": "health-fn",
     "type": "function",
     "z": "iotlink-tab",
-    "name": "Health",
-    "func": "msg.statusCode = 200;\nmsg.headers = { \"Content-Type\": \"application/json\" };\nmsg.payload = { status: \"ok\", service: \"iotlink-master\" };\nreturn msg;",
+    "name": "Health status",
+    "func": "msg.statusCode = 200;\nmsg.headers = { \"Content-Type\": \"application/json\" };\nmsg.payload = { status: \"ok\" };\nreturn msg;",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 410,
-    "y": 220,
+    "x": 440,
+    "y": 300,
     "wires": [
       [
-        "health-response"
+        "health-out"
       ]
     ]
   },
   {
-    "id": "health-response",
+    "id": "health-out",
     "type": "http response",
     "z": "iotlink-tab",
-    "name": "Respuesta health",
+    "name": "200",
     "statusCode": "",
     "headers": {},
-    "x": 670,
-    "y": 220,
+    "x": 720,
+    "y": 300,
     "wires": []
   }
 ]
